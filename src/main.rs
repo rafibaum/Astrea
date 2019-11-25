@@ -1,16 +1,30 @@
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
+use std::fs::File;
+use std::net::IpAddr;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct AstreaConfig {
+    host: IpAddr,
+    port: u16,
+    endpoints: Vec<(IpAddr, u16)>
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut listener = TcpListener::bind("127.0.0.1:25565").await?;
+    let config_file = File::open("astrea.yml").unwrap();
+    let config: AstreaConfig = serde_yaml::from_reader(config_file).unwrap();
+
+    let mut listener = TcpListener::bind((config.host, config.port)).await?;
 
     loop {
         let (client_sock, _) = listener.accept().await?;
+        let endpoint = config.endpoints.first().unwrap().clone();
 
         tokio::spawn(async move {
-            let server_sock = TcpStream::connect("localhost:25566").await.unwrap();
+            let server_sock = TcpStream::connect(endpoint).await.unwrap();
 
             let (mut client_read, mut client_write) = tokio::io::split(client_sock);
             let (mut server_read, mut server_write) = tokio::io::split(server_sock);
