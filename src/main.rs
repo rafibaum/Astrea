@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::net::IpAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -9,19 +10,20 @@ use tokio::net::TcpStream;
 struct AstreaConfig {
     host: IpAddr,
     port: u16,
-    endpoints: Vec<(IpAddr, u16)>,
+    endpoints: VecDeque<(IpAddr, u16)>,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = File::open("astrea.yml").unwrap();
-    let config: AstreaConfig = serde_yaml::from_reader(config_file).unwrap();
+    let mut config: AstreaConfig = serde_yaml::from_reader(config_file).unwrap();
 
     let mut listener = TcpListener::bind((config.host, config.port)).await?;
 
     loop {
         let (client_sock, _) = listener.accept().await?;
-        let endpoint = *config.endpoints.first().unwrap();
+        let endpoint = config.endpoints.pop_front().unwrap();
+        config.endpoints.push_back(endpoint);
 
         tokio::spawn(async move {
             let server_sock = TcpStream::connect(endpoint).await.unwrap();
