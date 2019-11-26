@@ -13,18 +13,28 @@ struct AstreaConfig {
     endpoints: Vec<(IpAddr, u16)>,
     #[serde(rename = "endpoint-selector")]
     endpoint_selector: EndpointSelectors,
+    protocol: Protocol,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_file = File::open("astrea.yml").unwrap();
     let config: AstreaConfig = serde_yaml::from_reader(config_file).unwrap();
-    let mut endpoint_selector: Box<dyn EndpointSelector> = match config.endpoint_selector {
+    let endpoint_selector: Box<dyn EndpointSelector> = match config.endpoint_selector {
         EndpointSelectors::RoundRobin => {
-            Box::new(RoundRobin::new(VecDeque::from(config.endpoints)))
+            Box::new(RoundRobin::new(VecDeque::from(config.endpoints.clone())))
         }
     };
 
+    match config.protocol {
+        Protocol::TCP => tcp(config, endpoint_selector).await,
+    }
+}
+
+async fn tcp(
+    config: AstreaConfig,
+    mut endpoint_selector: Box<dyn EndpointSelector>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut listener = TcpListener::bind((config.host, config.port)).await?;
 
     loop {
@@ -51,6 +61,12 @@ where
     if let Err(e) = reader.copy(&mut writer).await {
         println!("Socket broken: {:?}", e);
     }
+}
+
+#[derive(Debug, Deserialize)]
+enum Protocol {
+    #[serde(alias = "tcp")]
+    TCP,
 }
 
 #[derive(Debug, Deserialize)]

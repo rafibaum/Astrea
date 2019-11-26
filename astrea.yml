@@ -3,3 +3,4 @@ port: 8080
 endpoints: 
   - [127.0.0.1, 32400]
 endpoint-selector: round robin
+protocol: tcp
