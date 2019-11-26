@@ -2,7 +2,7 @@ mod endpoint;
 mod protocol;
 
 use crate::endpoint::*;
-use crate::protocol::{tcp, Protocol};
+use crate::protocol::{http, tcp, Protocol};
 use serde::Deserialize;
 use std::collections::VecDeque;
 use std::fs::File;
@@ -30,5 +30,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     match config.protocol {
         Protocol::TCP => tcp(config, endpoint_selector).await,
+        Protocol::HTTP => http(config, endpoint_selector).await,
     }
 }

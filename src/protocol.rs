@@ -6,8 +6,16 @@ use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Debug, Deserialize)]
 pub enum Protocol {
+    #[serde(alias = "http")]
+    HTTP,
     #[serde(alias = "tcp")]
     TCP,
+}
+
+pub async fn http(
+    config: AstreaConfig,
+    mut endpoint_selector: Box<dyn EndpointSelector>,
+) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 pub async fn tcp(
