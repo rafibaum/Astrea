@@ -57,26 +57,8 @@ pub async fn http(
             let secure_sock = acceptor.accept(client_sock).await.unwrap();
             let https_stream = MaybeHttpsStream::Https(secure_sock);
 
-            let proxy_service = service_fn(move |mut request: Request<Body>| {
-                let endpoint = Uri::from_str(&endpoint_selector.lock().unwrap().next()).unwrap();
-                let client = client.clone();
-                async move {
-                    // Add new endpoint to request
-                    let mut uri_parts = request.uri().clone().into_parts();
-                    let endpoint_parts = endpoint.into_parts();
-                    uri_parts.authority = endpoint_parts.authority;
-                    uri_parts.scheme = endpoint_parts.scheme;
-                    let uri = Uri::from_parts(uri_parts).unwrap();
-                    *request.uri_mut() = uri;
-
-                    // Replace host header value
-                    let host_string = &request.uri().authority_part().unwrap().to_string();
-                    request
-                        .headers_mut()
-                        .insert(header::HOST, HeaderValue::from_str(host_string).unwrap());
-
-                    client.request(request).await
-                }
+            let proxy_service = service_fn(move |request: Request<Body>| {
+                proxy_request(request, endpoint_selector.clone(), client.clone())
             });
 
             server
@@ -85,4 +67,27 @@ pub async fn http(
                 .unwrap();
         });
     }
+}
+
+async fn proxy_request<C: Connect + 'static>(
+    mut request: Request<Body>,
+    endpoint_selector: Arc<Mutex<Box<dyn EndpointSelector + Send + Sync>>>,
+    client: Arc<Client<C, hyper::Body>>,
+) -> HyperResult<Response<Body>> {
+    let endpoint = { Uri::from_str(&endpoint_selector.lock().unwrap().next()).unwrap() };
+    // Add new endpoint to request
+    let mut uri_parts = request.uri().clone().into_parts();
+    let endpoint_parts = endpoint.into_parts();
+    uri_parts.authority = endpoint_parts.authority;
+    uri_parts.scheme = endpoint_parts.scheme;
+    let uri = Uri::from_parts(uri_parts).unwrap();
+    *request.uri_mut() = uri;
+
+    // Replace host header value
+    let host_string = &request.uri().authority_part().unwrap().to_string();
+    request
+        .headers_mut()
+        .insert(header::HOST, HeaderValue::from_str(host_string).unwrap());
+
+    client.request(request).await
 }
