@@ -2,6 +2,7 @@ mod endpoint;
 mod protocol;
 
 use crate::endpoint::*;
+use crate::protocol::http::HttpsConfig;
 use crate::protocol::{http, tcp, Protocol};
 use serde::Deserialize;
 use std::collections::VecDeque;
@@ -16,6 +17,8 @@ pub struct AstreaConfig {
     #[serde(rename = "endpoint-selector")]
     endpoint_selector: EndpointSelectors,
     protocol: Protocol,
+    #[serde(rename = "https")]
+    https_config: Option<HttpsConfig>,
 }
 
 #[tokio::main]

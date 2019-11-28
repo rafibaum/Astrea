@@ -1,33 +1,45 @@
 use crate::AstreaConfig;
 use crate::EndpointSelector;
 use core::str::FromStr;
+use hyper::client::connect::Connect;
+use hyper::error::Result as HyperResult;
 use hyper::header::HeaderValue;
 use hyper::server::conn::Http;
 use hyper::service::service_fn;
-use hyper::{header, Body, Client, Request, Uri};
+use hyper::{header, Body, Client, Request, Response, Uri};
 use hyper_tls::{HttpsConnector, MaybeHttpsStream};
 use native_tls::Identity;
+use serde::Deserialize;
 use std::fs::File;
 use std::io::Read;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio_tls::TlsAcceptor;
 
+#[derive(Debug, Deserialize)]
+pub struct HttpsConfig {
+    #[serde(rename = "identity-file")]
+    identity_file: String,
+    #[serde(default)]
+    password: String,
+}
+
 pub async fn http(
     config: AstreaConfig,
     endpoint_selector: Box<dyn EndpointSelector + Send + Sync>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Initialise server-side HTTPS
-    let https = HttpsConnector::new().expect("TLS initialization failed");
-    let mut file = File::open("astrea.p12").unwrap();
+    let https_config = config.https_config.unwrap();
+    let mut file = File::open(https_config.identity_file).unwrap();
     let mut identity = vec![];
     file.read_to_end(&mut identity).unwrap();
-    let identity = Identity::from_pkcs12(&identity, "astrea").unwrap();
+    let identity = Identity::from_pkcs12(&identity, &https_config.password).unwrap();
     let acceptor = Arc::new(TlsAcceptor::from(
         native_tls::TlsAcceptor::new(identity).unwrap(),
     ));
 
     let server = Arc::new(Http::new());
+    let https = HttpsConnector::new().expect("TLS initialization failed");
     let client = Arc::new(Client::builder().build::<_, hyper::Body>(https));
     let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
 

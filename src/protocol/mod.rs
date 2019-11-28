@@ -1,4 +1,4 @@
-mod http;
+pub mod http;
 mod tcp;
 
 pub use self::http::http;

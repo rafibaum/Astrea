@@ -1,6 +1,9 @@
 host: 127.0.0.1
-port: 8086
+port: 8080
 endpoints: 
   - "https://example.com"
 endpoint-selector: round robin
 protocol: http
+https: 
+  identity-file: astrea.p12
+  password: astrea
