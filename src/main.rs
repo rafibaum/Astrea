@@ -12,7 +12,7 @@ use std::net::IpAddr;
 pub struct AstreaConfig {
     host: IpAddr,
     port: u16,
-    endpoints: Vec<(IpAddr, u16)>,
+    endpoints: Vec<String>,
     #[serde(rename = "endpoint-selector")]
     endpoint_selector: EndpointSelectors,
     protocol: Protocol,

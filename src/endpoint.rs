@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use std::collections::VecDeque;
-use std::net::IpAddr;
 
 #[derive(Debug, Deserialize)]
 pub enum EndpointSelectors {
@@ -9,24 +8,24 @@ pub enum EndpointSelectors {
 }
 
 pub trait EndpointSelector {
-    fn next(&mut self) -> (IpAddr, u16);
+    fn next(&mut self) -> String;
 }
 
 pub struct RoundRobin {
-    endpoints: VecDeque<(IpAddr, u16)>,
+    endpoints: VecDeque<String>,
 }
 
 impl RoundRobin {
-    pub fn new(endpoints: VecDeque<(IpAddr, u16)>) -> RoundRobin {
+    pub fn new(endpoints: VecDeque<String>) -> RoundRobin {
         assert!(!endpoints.is_empty());
         RoundRobin { endpoints }
     }
 }
 
 impl EndpointSelector for RoundRobin {
-    fn next(&mut self) -> (IpAddr, u16) {
+    fn next(&mut self) -> String {
         let result = self.endpoints.pop_front().unwrap();
-        self.endpoints.push_back(result);
+        self.endpoints.push_back(result.clone());
         result
     }
 }
