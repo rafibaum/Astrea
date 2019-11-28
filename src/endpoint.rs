@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 
 #[derive(Debug, Deserialize)]
 pub enum EndpointSelectors {
-    #[serde(alias = "round robin")]
+    #[serde(rename = "round robin")]
     RoundRobin,
 }
 

@@ -12,9 +12,9 @@ use tokio::net::{TcpListener, TcpStream};
 
 #[derive(Debug, Deserialize)]
 pub enum Protocol {
-    #[serde(alias = "http")]
+    #[serde(rename = "http")]
     HTTP,
-    #[serde(alias = "tcp")]
+    #[serde(rename = "tcp")]
     TCP,
 }
 
