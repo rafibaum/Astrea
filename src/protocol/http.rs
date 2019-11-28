@@ -28,9 +28,21 @@ pub async fn http(
     config: AstreaConfig,
     endpoint_selector: Box<dyn EndpointSelector + Send + Sync>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Initialise server-side HTTPS
-    let https_config = config.https_config.unwrap();
-    let mut file = File::open(https_config.identity_file).unwrap();
+    let config = Arc::new(config);
+    let https_connector = HttpsConnector::new().expect("TLS initialization failed");
+    let client = Arc::new(Client::builder().build::<_, hyper::Body>(https_connector));
+    let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
+    
+    https(config, client.clone(), endpoint_selector.clone()).await
+}
+
+async fn https<C: Connect + 'static>(
+    config: Arc<AstreaConfig>,
+    client: Arc<Client<C, hyper::Body>>,
+    endpoint_selector: Arc<Mutex<Box<dyn EndpointSelector + Send + Sync>>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let https_config = config.https_config.as_ref().unwrap();
+    let mut file = File::open(https_config.identity_file.clone()).unwrap();
     let mut identity = vec![];
     file.read_to_end(&mut identity).unwrap();
     let identity = Identity::from_pkcs12(&identity, &https_config.password).unwrap();
@@ -39,9 +51,6 @@ pub async fn http(
     ));
 
     let server = Arc::new(Http::new());
-    let https = HttpsConnector::new().expect("TLS initialization failed");
-    let client = Arc::new(Client::builder().build::<_, hyper::Body>(https));
-    let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
 
     let mut listener = TcpListener::bind((config.host, config.port)).await?;
 
