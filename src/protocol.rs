@@ -1,7 +1,6 @@
 use crate::endpoint::EndpointSelector;
 use crate::AstreaConfig;
 use core::str::FromStr;
-use http::uri::{Authority, Scheme};
 use hyper::header::HeaderValue;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Client, Error, Request, Server, Uri};
@@ -28,20 +27,22 @@ pub async fn http(
         let endpoint_selector = endpoint_selector.clone();
         async move {
             Ok::<_, Error>(service_fn(move |mut request: Request<Body>| {
-                let endpoint = endpoint_selector.lock().unwrap().next();
+                let endpoint = Uri::from_str(&endpoint_selector.lock().unwrap().next()).unwrap();
                 async move {
                     let client = Client::new();
                     // Add new endpoint to request
                     let mut uri_parts = request.uri().clone().into_parts();
-                    uri_parts.authority = Some(Authority::from_str(&endpoint).unwrap());
-                    uri_parts.scheme = Some(Scheme::from_str("http").unwrap());
+                    let endpoint_parts = endpoint.into_parts();
+                    uri_parts.authority = endpoint_parts.authority;
+                    uri_parts.scheme = endpoint_parts.scheme;
                     let uri = Uri::from_parts(uri_parts).unwrap();
                     *request.uri_mut() = uri;
 
                     // Replace host header value
+                    let host_string = &request.uri().authority_part().unwrap().to_string();
                     request
                         .headers_mut()
-                        .insert(header::HOST, HeaderValue::from_str(&endpoint).unwrap());
+                        .insert(header::HOST, HeaderValue::from_str(host_string).unwrap());
 
                     client.request(request).await
                 }
