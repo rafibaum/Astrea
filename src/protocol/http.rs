@@ -2,25 +2,50 @@ use crate::AstreaConfig;
 use crate::EndpointSelector;
 use core::str::FromStr;
 use hyper::header::HeaderValue;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{header, Body, Client, Error, Request, Server, Uri};
-use hyper_tls::HttpsConnector;
-use std::net::SocketAddr;
+use hyper::server::conn::Http;
+use hyper::service::service_fn;
+use hyper::{header, Body, Client, Request, Uri};
+use hyper_tls::{HttpsConnector, MaybeHttpsStream};
+use native_tls::Identity;
+use std::fs::File;
+use std::io::Read;
 use std::sync::{Arc, Mutex};
+use tokio::net::TcpListener;
+use tokio_tls::TlsAcceptor;
 
 pub async fn http(
     config: AstreaConfig,
     endpoint_selector: Box<dyn EndpointSelector + Send + Sync>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
+    // Initialise server-side HTTPS
     let https = HttpsConnector::new().expect("TLS initialization failed");
-    let client = Arc::new(Client::builder().build::<_, hyper::Body>(https));
+    let mut file = File::open("astrea.p12").unwrap();
+    let mut identity = vec![];
+    file.read_to_end(&mut identity).unwrap();
+    let identity = Identity::from_pkcs12(&identity, "astrea").unwrap();
+    let acceptor = Arc::new(TlsAcceptor::from(
+        native_tls::TlsAcceptor::new(identity).unwrap(),
+    ));
 
-    let proxy_service = make_service_fn(move |_| {
+    let server = Arc::new(Http::new());
+    let client = Arc::new(Client::builder().build::<_, hyper::Body>(https));
+    let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
+
+    let mut listener = TcpListener::bind((config.host, config.port)).await?;
+
+    loop {
+        let (client_sock, _) = listener.accept().await?;
+
+        let acceptor = acceptor.clone();
         let endpoint_selector = endpoint_selector.clone();
         let client = client.clone();
-        async move {
-            Ok::<_, Error>(service_fn(move |mut request: Request<Body>| {
+        let server = server.clone();
+
+        tokio::spawn(async move {
+            let secure_sock = acceptor.accept(client_sock).await.unwrap();
+            let https_stream = MaybeHttpsStream::Https(secure_sock);
+
+            let proxy_service = service_fn(move |mut request: Request<Body>| {
                 let endpoint = Uri::from_str(&endpoint_selector.lock().unwrap().next()).unwrap();
                 let client = client.clone();
                 async move {
@@ -40,15 +65,12 @@ pub async fn http(
 
                     client.request(request).await
                 }
-            }))
-        }
-    });
+            });
 
-    let server = Server::bind(&SocketAddr::from((config.host, config.port))).serve(proxy_service);
-
-    if let Err(e) = server.await {
-        Err(Box::new(e) as Box<dyn std::error::Error>)
-    } else {
-        Ok(())
+            server
+                .serve_connection(https_stream, proxy_service)
+                .await
+                .unwrap();
+        });
     }
 }
