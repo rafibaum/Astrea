@@ -1,6 +1,6 @@
 host: 127.0.0.1
-port: 8082
+port: 8085
 endpoints: 
-  - "http://example.com:80"
+  - "https://example.com"
 endpoint-selector: round robin
 protocol: http
