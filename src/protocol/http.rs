@@ -5,13 +5,14 @@ use hyper::client::connect::Connect;
 use hyper::error::Result as HyperResult;
 use hyper::header::HeaderValue;
 use hyper::server::conn::Http;
-use hyper::service::service_fn;
-use hyper::{header, Body, Client, Request, Response, Uri};
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{header, Body, Client, Error, Request, Response, Server, Uri};
 use hyper_tls::{HttpsConnector, MaybeHttpsStream};
 use native_tls::Identity;
 use serde::Deserialize;
 use std::fs::File;
 use std::io::Read;
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio_tls::TlsAcceptor;
@@ -22,6 +23,8 @@ pub struct HttpsConfig {
     identity_file: String,
     #[serde(default)]
     password: String,
+    #[serde(default = "default_port")]
+    port: u16,
 }
 
 pub async fn http(
@@ -32,8 +35,33 @@ pub async fn http(
     let https_connector = HttpsConnector::new().expect("TLS initialization failed");
     let client = Arc::new(Client::builder().build::<_, hyper::Body>(https_connector));
     let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
-    
-    https(config, client.clone(), endpoint_selector.clone()).await
+
+    if config.https_config.is_some() {
+        let client = client.clone();
+        let endpoint_selector = endpoint_selector.clone();
+        let config = config.clone();
+        tokio::spawn(async {
+            https(config, client, endpoint_selector).await.unwrap();
+        });
+    }
+
+    let http_service = make_service_fn(|_| {
+        let client = client.clone();
+        let endpoint_selector = endpoint_selector.clone();
+        async {
+            Ok::<_, Error>(service_fn(move |request: Request<Body>| {
+                proxy_request(request, endpoint_selector.clone(), client.clone())
+            }))
+        }
+    });
+
+    let server = Server::bind(&SocketAddr::from((config.host, config.port))).serve(http_service);
+
+    if let Err(e) = server.await {
+        Err(Box::new(e) as Box<dyn std::error::Error>)
+    } else {
+        Ok(())
+    }
 }
 
 async fn https<C: Connect + 'static>(
@@ -42,25 +70,25 @@ async fn https<C: Connect + 'static>(
     endpoint_selector: Arc<Mutex<Box<dyn EndpointSelector + Send + Sync>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let https_config = config.https_config.as_ref().unwrap();
+
     let mut file = File::open(https_config.identity_file.clone()).unwrap();
     let mut identity = vec![];
     file.read_to_end(&mut identity).unwrap();
     let identity = Identity::from_pkcs12(&identity, &https_config.password).unwrap();
+
     let acceptor = Arc::new(TlsAcceptor::from(
         native_tls::TlsAcceptor::new(identity).unwrap(),
     ));
-
     let server = Arc::new(Http::new());
-
-    let mut listener = TcpListener::bind((config.host, config.port)).await?;
+    let mut listener = TcpListener::bind((config.host, https_config.port)).await?;
 
     loop {
-        let (client_sock, _) = listener.accept().await?;
-
         let acceptor = acceptor.clone();
         let endpoint_selector = endpoint_selector.clone();
         let client = client.clone();
         let server = server.clone();
+
+        let (client_sock, _) = listener.accept().await?;
 
         tokio::spawn(async move {
             let secure_sock = acceptor.accept(client_sock).await.unwrap();
@@ -99,4 +127,8 @@ async fn proxy_request<C: Connect + 'static>(
         .insert(header::HOST, HeaderValue::from_str(host_string).unwrap());
 
     client.request(request).await
+}
+
+fn default_port() -> u16 {
+    443
 }

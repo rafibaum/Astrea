@@ -12,6 +12,7 @@ use std::net::IpAddr;
 #[derive(Debug, Deserialize)]
 pub struct AstreaConfig {
     host: IpAddr,
+    #[serde(default = "default_port")]
     port: u16,
     endpoints: Vec<String>,
     #[serde(rename = "endpoint-selector")]
@@ -36,4 +37,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Protocol::TCP => tcp(config, endpoint_selector).await,
         Protocol::HTTP => http(config, endpoint_selector).await,
     }
+}
+
+fn default_port() -> u16 {
+    80
 }
