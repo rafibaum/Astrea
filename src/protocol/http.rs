@@ -7,15 +7,14 @@ use hyper::header::HeaderValue;
 use hyper::server::conn::Http;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{header, Body, Client, Error, Request, Response, Server, Uri};
-use hyper_tls::{HttpsConnector, MaybeHttpsStream};
-use native_tls::Identity;
+use hyper_rustls::{HttpsConnector, MaybeHttpsStream};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::Read;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
-use tokio_tls::TlsAcceptor;
+use tokio_rustls::TlsAcceptor;
 
 #[derive(Debug, Deserialize)]
 pub struct HttpsConfig {
@@ -32,8 +31,10 @@ pub async fn http(
     endpoint_selector: Box<dyn EndpointSelector + Send + Sync>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = Arc::new(config);
-    let https_connector = HttpsConnector::new().expect("TLS initialization failed");
-    let client = Arc::new(Client::builder().build::<_, hyper::Body>(https_connector));
+    let https_connector = HttpsConnector::new();
+    let mut client = Client::builder();
+    client.http2_only(true);
+    let client = Arc::new(client.build::<_, hyper::Body>(https_connector));
     let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
 
     if config.https_config.is_some() {
@@ -79,7 +80,10 @@ async fn https<C: Connect + 'static>(
     let acceptor = Arc::new(TlsAcceptor::from(
         native_tls::TlsAcceptor::new(identity).unwrap(),
     ));
-    let server = Arc::new(Http::new());
+
+    let mut http = Http::new();
+    http.http2_only(true);
+    let server = Arc::new(http);
     let mut listener = TcpListener::bind((config.host, https_config.port)).await?;
 
     loop {
