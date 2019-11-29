@@ -33,7 +33,6 @@ pub async fn http(
     let config = Arc::new(config);
     let https_connector = HttpsConnector::new();
     let mut client = Client::builder();
-    client.http2_only(true);
     let client = Arc::new(client.build::<_, hyper::Body>(https_connector));
     let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
 
@@ -72,17 +71,24 @@ async fn https<C: Connect + 'static>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let https_config = config.https_config.as_ref().unwrap();
 
-    let mut file = File::open(https_config.identity_file.clone()).unwrap();
-    let mut identity = vec![];
-    file.read_to_end(&mut identity).unwrap();
-    let identity = Identity::from_pkcs12(&identity, &https_config.password).unwrap();
+    let cert_file = File::open("astrea.pem").unwrap();
+    let mut cert_reader = std::io::BufReader::new(cert_file);
+    let cert = rustls::internal::pemfile::certs(&mut cert_reader).unwrap();
 
-    let acceptor = Arc::new(TlsAcceptor::from(
-        native_tls::TlsAcceptor::new(identity).unwrap(),
-    ));
+    let key_file = File::open("astrea.key").unwrap();
+    let mut key_reader = std::io::BufReader::new(key_file);
+    let key = rustls::internal::pemfile::rsa_private_keys(&mut key_reader).unwrap()[0].clone();
+
+    let mut tls_config = rustls::ServerConfig::new(rustls::NoClientAuth::new());
+    tls_config.set_single_cert(cert, key).unwrap();
+    tls_config.set_protocols(&vec![b"h2".to_vec(), b"http/1.1".to_vec()]);
+    let tls_config = Arc::new(tls_config);
+
+    let acceptor = TlsAcceptor::from(tls_config);
+
+        // acceptor
 
     let mut http = Http::new();
-    http.http2_only(true);
     let server = Arc::new(http);
     let mut listener = TcpListener::bind((config.host, https_config.port)).await?;
 
@@ -96,14 +102,13 @@ async fn https<C: Connect + 'static>(
 
         tokio::spawn(async move {
             let secure_sock = acceptor.accept(client_sock).await.unwrap();
-            let https_stream = MaybeHttpsStream::Https(secure_sock);
 
             let proxy_service = service_fn(move |request: Request<Body>| {
                 proxy_request(request, endpoint_selector.clone(), client.clone())
             });
 
             server
-                .serve_connection(https_stream, proxy_service)
+                .serve_connection(secure_sock, proxy_service)
                 .await
                 .unwrap();
         });
