@@ -24,8 +24,8 @@ pub struct AstreaConfig {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config_file = File::open("astrea.yml").unwrap();
-    let config: AstreaConfig = serde_yaml::from_reader(config_file).unwrap();
+    let config_file = File::open("astrea.yml").expect("Config file couldn't be opened");
+    let config: AstreaConfig = serde_yaml::from_reader(config_file).expect("Config file is incorrectly formatted");
     let endpoint_selector: Box<dyn EndpointSelector + Send + Sync> = match config.endpoint_selector
     {
         EndpointSelectors::RoundRobin => {

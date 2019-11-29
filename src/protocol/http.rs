@@ -71,16 +71,16 @@ async fn https<C: Connect + 'static>(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let https_config = config.https_config.as_ref().unwrap();
 
-    let mut file = File::open(https_config.identity_file.clone()).unwrap();
+    let mut file = File::open(https_config.identity_file.clone()).expect("TLS certificate file could not be opened");
     let mut identity = vec![];
-    file.read_to_end(&mut identity).unwrap();
-    let identity = Identity::from_pkcs12(&identity, &https_config.password).unwrap();
+    file.read_to_end(&mut identity).expect("TLS certificate file could not be read");
+    let identity = Identity::from_pkcs12(&identity, &https_config.password).expect("Incorrect password used for TLS certificate");
 
     let acceptor = Arc::new(TlsAcceptor::from(
-        native_tls::TlsAcceptor::new(identity).unwrap(),
+        native_tls::TlsAcceptor::new(identity).expect("Could not initialise TLS handler"),
     ));
     let server = Arc::new(Http::new());
-    let mut listener = TcpListener::bind((config.host, https_config.port)).await?;
+    let mut listener = TcpListener::bind((config.host, https_config.port)).await.expect("Could not bind TCP listener");
 
     loop {
         let acceptor = acceptor.clone();
@@ -91,7 +91,7 @@ async fn https<C: Connect + 'static>(
         let (client_sock, _) = listener.accept().await?;
 
         tokio::spawn(async move {
-            let secure_sock = acceptor.accept(client_sock).await.unwrap();
+            let secure_sock = acceptor.accept(client_sock).await.expect("Could not negotiate TLS stream");
             let https_stream = MaybeHttpsStream::Https(secure_sock);
 
             let proxy_service = service_fn(move |request: Request<Body>| {
@@ -111,7 +111,7 @@ async fn proxy_request<C: Connect + 'static>(
     endpoint_selector: Arc<Mutex<Box<dyn EndpointSelector + Send + Sync>>>,
     client: Arc<Client<C, hyper::Body>>,
 ) -> HyperResult<Response<Body>> {
-    let endpoint = { Uri::from_str(&endpoint_selector.lock().unwrap().next()).unwrap() };
+    let endpoint = { Uri::from_str(&endpoint_selector.lock().unwrap().next()).expect("Could not convert endpoint to URL") };
     // Add new endpoint to request
     let mut uri_parts = request.uri().clone().into_parts();
     let endpoint_parts = endpoint.into_parts();
