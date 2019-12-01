@@ -1,4 +1,4 @@
-use crate::AstreaConfig;
+use crate::EndpointParser;
 use crate::EndpointSelector;
 use core::str::FromStr;
 use hyper::client::connect::Connect;
@@ -27,21 +27,32 @@ pub struct HttpsConfig {
     port: u16,
 }
 
+pub struct HttpEndpointParser;
+
+impl EndpointParser<Uri> for HttpEndpointParser {
+    fn parse_endpoint(&self, input: String) -> Uri {
+        Uri::from_str(&input).expect("Could not convert endpoint to URL")
+    }
+}
+
 pub async fn http(
-    config: AstreaConfig,
-    endpoint_selector: Box<dyn EndpointSelector + Send + Sync>,
+    address: SocketAddr,
+    endpoint_selector: EndpointSelector<Uri>,
+    https_config: Option<HttpsConfig>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let config = Arc::new(config);
+    let address = Arc::new(address);
     let https_connector = HttpsConnector::new().expect("TLS initialization failed");
     let client = Arc::new(Client::builder().build::<_, hyper::Body>(https_connector));
     let endpoint_selector = Arc::new(Mutex::new(endpoint_selector));
 
-    if config.https_config.is_some() {
+    if https_config.is_some() {
         let client = client.clone();
         let endpoint_selector = endpoint_selector.clone();
-        let config = config.clone();
-        tokio::spawn(async {
-            https(config, client, endpoint_selector).await.unwrap();
+        let address = address.clone();
+        tokio::spawn(async move {
+            https(address, https_config, client, endpoint_selector)
+                .await
+                .unwrap();
         });
     }
 
@@ -55,7 +66,7 @@ pub async fn http(
         }
     });
 
-    let server = Server::bind(&SocketAddr::from((config.host, config.port))).serve(http_service);
+    let server = Server::bind(&address).serve(http_service);
 
     if let Err(e) = server.await {
         Err(Box::new(e) as Box<dyn std::error::Error>)
@@ -65,22 +76,31 @@ pub async fn http(
 }
 
 async fn https<C: Connect + 'static>(
-    config: Arc<AstreaConfig>,
+    address: Arc<SocketAddr>,
+    https_config: Option<HttpsConfig>,
     client: Arc<Client<C, hyper::Body>>,
-    endpoint_selector: Arc<Mutex<Box<dyn EndpointSelector + Send + Sync>>>,
+    endpoint_selector: Arc<Mutex<EndpointSelector<Uri>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let https_config = config.https_config.as_ref().unwrap();
+    let https_config = https_config.as_ref().unwrap();
 
-    let mut file = File::open(https_config.identity_file.clone()).expect("TLS certificate file could not be opened");
+    let mut file = File::open(https_config.identity_file.clone())
+        .expect("TLS certificate file could not be opened");
     let mut identity = vec![];
-    file.read_to_end(&mut identity).expect("TLS certificate file could not be read");
-    let identity = Identity::from_pkcs12(&identity, &https_config.password).expect("Incorrect password used for TLS certificate");
+    file.read_to_end(&mut identity)
+        .expect("TLS certificate file could not be read");
+    let identity = Identity::from_pkcs12(&identity, &https_config.password)
+        .expect("Incorrect password used for TLS certificate");
 
     let acceptor = Arc::new(TlsAcceptor::from(
         native_tls::TlsAcceptor::new(identity).expect("Could not initialise TLS handler"),
     ));
     let server = Arc::new(Http::new());
-    let mut listener = TcpListener::bind((config.host, https_config.port)).await.expect("Could not bind TCP listener");
+    let mut address = address.as_ref().clone();
+    address.set_port(https_config.port);
+
+    let mut listener = TcpListener::bind(address)
+        .await
+        .expect("Could not bind TCP listener");
 
     loop {
         let acceptor = acceptor.clone();
@@ -91,7 +111,10 @@ async fn https<C: Connect + 'static>(
         let (client_sock, _) = listener.accept().await?;
 
         tokio::spawn(async move {
-            let secure_sock = acceptor.accept(client_sock).await.expect("Could not negotiate TLS stream");
+            let secure_sock = acceptor
+                .accept(client_sock)
+                .await
+                .expect("Could not negotiate TLS stream");
             let https_stream = MaybeHttpsStream::Https(secure_sock);
 
             let proxy_service = service_fn(move |request: Request<Body>| {
@@ -108,10 +131,10 @@ async fn https<C: Connect + 'static>(
 
 async fn proxy_request<C: Connect + 'static>(
     mut request: Request<Body>,
-    endpoint_selector: Arc<Mutex<Box<dyn EndpointSelector + Send + Sync>>>,
+    endpoint_selector: Arc<Mutex<EndpointSelector<Uri>>>,
     client: Arc<Client<C, hyper::Body>>,
 ) -> HyperResult<Response<Body>> {
-    let endpoint = { Uri::from_str(&endpoint_selector.lock().unwrap().next()).expect("Could not convert endpoint to URL") };
+    let endpoint = { endpoint_selector.lock().unwrap().next() };
     // Add new endpoint to request
     let mut uri_parts = request.uri().clone().into_parts();
     let endpoint_parts = endpoint.into_parts();

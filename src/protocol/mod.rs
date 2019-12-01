@@ -1,5 +1,5 @@
 pub mod http;
-mod tcp;
+pub mod tcp;
 
 pub use self::http::http;
 pub use self::tcp::tcp;
